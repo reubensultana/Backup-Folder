@@ -1,6 +1,13 @@
+# This script needs to be run as an Administrator in order to function properly.
+If (!([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]'Administrator')) {
+    Write-Warning "You didn't run this script as an Administrator. Please close this session and start the process as an Administrator before running the script."
+    return
+}
+
 # get the current folder
 [string] $CurrentFolder = $(Get-Location).Path
 [string] $ConfigFile = "$CurrentFolder\config.txt"
+[string] $LogFolder = "$CurrentFolder\_log"
 [string] $FolderName = ""
 
 # check if config file exists
@@ -18,24 +25,22 @@ if ($FolderList.Count -eq 0) {
     return
 }
 
-# command template - this technique is used to include double-quotes in the command
-$CopyCommandTemplate = (@"
-rem robocopy "{0}" "$CurrentFolder\{1}" *.* /e /w:1 /r:1 /tee /np /XO /xd "`$RECYCLE.BIN" /xf "desktop.ini" /xf "DockerDesktop.vhdx" /xf "*.iso" /xf "*.vhd*" /xf "thumbs.db" /v /LOG:"$CurrentFolder\_log\{2}.log" & pause
-"@)
+# check and create log folder
+if ($false -eq (Test-Path $LogFolder -PathType Container)) {
+    New-Item -Path $LogFolder -ItemType Directory -ErrorAction SilentlyContinue | Out-Null
+}
+
+# command template
+[string] $CopyCommandTemplate = "robocopy ""{0}"" ""$CurrentFolder\{1}"" *.* /copyall /e /purge /w:1 /r:1 /tee /np /XO /xd '`$RECYCLE.BIN' /xf 'desktop.ini' /xf 'DockerDesktop.vhdx' /xf '*.iso' /xf '*.vhd*' /xf 'thumbs.db' /v /LOG:""$LogFolder\{2}.log"" & pause"
 
 # spawn multiple copy processes
 foreach ($Folder in $FolderList) {
     # get the name of the folder being copied
     $FolderName = $(Get-Item $Folder).Name
 
-    $CopyCommandTemplate.Replace("{0}", $Folder).Replace("{1}", $FolderName).Replace("{2}", $FolderName)
-
     ## build copy command
     [string] $CopyCommand = $CopyCommandTemplate -f $Folder,$FolderName,$FolderName
-    # Write-Output $CopyCommand
 
-    # generate the batch files to run the backups
-    $CopyCommand | Out-File -FilePath ".\$FolderName.cmd" -Encoding utf8 -Force
-
-    Start-Process -UseNewEnvironment -FilePath "cmd.exe" -ArgumentList "/C $CurrentFolder\$FolderName.cmd"
+    Write-Output $CopyCommand
+    Start-Process -UseNewEnvironment -FilePath "cmd.exe" -ArgumentList "/C $CopyCommand"
 }
